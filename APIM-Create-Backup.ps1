@@ -1,92 +1,69 @@
-<#
-.SYNOPSIS
-    Creates a backup of an Azure API Management (APIM) instance.
-
-.DESCRIPTION
-    This script creates a backup of an Azure API Management (APIM) instance and stores it in an Azure Storage account.
-
-.PARAMETER ResourceGroupName
-    The name of the resource group containing the APIM instance.
-
-.PARAMETER ServiceName
-    The name of the APIM instance.
-
-.PARAMETER StorageAccountName
-    The name of the Azure Storage account where the backup will be stored.
-
-.PARAMETER StorageAccountKey
-    The key for the Azure Storage account.
-
-.PARAMETER BackupContainer
-    The name of the container in the Azure Storage account where the backup will be stored.
-
-.EXAMPLE
-    .\APIM-Create-Backup.ps1 -ResourceGroupName "MyResourceGroup" -ServiceName "MyAPIMService" -StorageAccountName "MyStorageAccount" -StorageAccountKey "MyStorageKey" -BackupContainer "backups"
-#>
-
-param (
-    [Parameter(Mandatory=$true)]
+param(
+    [string]$subscriptionId,
     [string]$ResourceGroupName,
-
-    [Parameter(Mandatory=$true)]
-    [string]$ServiceName,
-
-    [Parameter(Mandatory=$true)]
+    [string]$ApiManagementName,
     [string]$StorageAccountName,
-
-    [Parameter(Mandatory=$true)]
-    [string]$StorageAccountKey,
-
-    [Parameter(Mandatory=$true)]
-    [string]$BackupContainer
+    [string]$ContainerName
 )
 
-# Enable error handling
-$ErrorActionPreference = "Stop"
+<#
+.SYNOPSIS
+    This script uses the Azure CLI to extract an access token and call the Azure Management API to back up an API Management service.
 
-# Function to log messages
+.DESCRIPTION
+    The script logs in using a system-assigned managed identity, retrieves an access token, and uses it to call the Azure Management API for backing up an API Management service.
+
+.PARAMETER subscriptionId
+    The subscription ID where the API Management service is located.
+
+.PARAMETER ResourceGroupName
+    The name of the resource group containing the API Management service.
+
+.PARAMETER ApiManagementName
+    The name of the API Management service to back up.
+
+.PARAMETER StorageAccountName
+    The name of the storage account where the backup will be stored.
+
+.PARAMETER ContainerName
+    The name of the container within the storage account where the backup will be stored.
+
+.EXAMPLE
+    .\Backup-APIM.ps1 -subscriptionId "your-subscription-id" -ResourceGroupName "your-resource-group" -ApiManagementName "your-apim-name" -StorageAccountName "your-storage-account" -ContainerName "your-container-name"
+#>
+
 function Log-Message {
     param (
-        [string]$Message
+        [string]$message,
+        [string]$level = "INFO"
     )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Write-Output "$timestamp - $Message"
+    Write-Output "$timestamp [$level] $message"
 }
 
 try {
-    Log-Message "Starting backup process for APIM instance '$ServiceName' in resource group '$ResourceGroupName'."
+    Log-Message "Logging in using system-assigned managed identity..."
+    az login --identity
 
-    # Login to Azure
-    Log-Message "Logging in to Azure..."
-    az login --identity   
-    Log-Message "Successfully logged in to Azure."
-
-    # Create the backup
-    Log-Message "Creating backup..."
-
-    #get access token using azure cli
+    Log-Message "Retrieving access token..."
     $token = az account get-access-token --subscription $subscriptionId --query accessToken --output tsv
-          
-    $backupName = "backup-" + $apiManagementName + "-" + $(Get-Date -Format 'yyyyMMddHHmmss')
-    $accessType="SystemAssignedManagedIdentity"
-    
-    #construct API call for the azure management API
-    $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" + $ResourceGroupName + "/providers/Microsoft.ApiManagement/service/"+ $ApiManagementName + "/backup?api-version=2024-05-01"
+
+    $backupName = "backup-" + $ApiManagementName + "-" + $(Get-Date -Format 'yyyyMMddHHmmss')
+    $accessType = "SystemAssignedManagedIdentity"
+
+    $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.ApiManagement/service/$ApiManagementName/backup?api-version=2024-05-01"
     $body = @{
-        storageAccount = $StorageAccountName          
+        storageAccount = $StorageAccountName
         containerName = $ContainerName
-        backupName = $BackupName
+        backupName = $backupName
         accessType = $accessType
     } | ConvertTo-Json
-    
-    #call azure management API with access token
-    Invoke-RestMethod -Method Post -Uri $uri -Headers @{Authorization = "Bearer $token"} -ContentType "application/json" -Body $body
-    
-    Log-Message "Backup created successfully and stored in container '$BackupContainer'."
 
+    Log-Message "Initiating backup..."
+    $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" -Body $body
+
+    Log-Message "Backup initiated successfully."
 } catch {
-    Log-Message "An error occurred: $_"
+    Log-Message "An error occurred: $_" "ERROR"
     throw
-} finally {
-    Log-Message "Backup process completed."
 }
