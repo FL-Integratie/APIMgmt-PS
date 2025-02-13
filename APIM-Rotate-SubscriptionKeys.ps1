@@ -1,62 +1,68 @@
 <#
 .SYNOPSIS
-    Rotates subscription keys for Azure API Management.
+    This script regenerates the primary and secondary keys for API Management subscriptions.
 
 .DESCRIPTION
-    This script rotates the primary and secondary subscription keys for a specified API Management service and subscription.
+    The script connects to Azure using a system-assigned managed identity, retrieves API Management services, and regenerates the primary and secondary keys for subscriptions with a specific ProductID.
 
-.PARAMETER ResourceGroupName
-    The name of the resource group containing the API Management service.
-
-.PARAMETER ServiceName
+.PARAMETER apimName
     The name of the API Management service.
 
-.PARAMETER SubscriptionId
-    The ID of the subscription whose keys are to be rotated.
+.PARAMETER apimResourceGroup
+    The name of the resource group containing the API Management service.
+
+.PARAMETER masterSubscriptionId
+    The subscription ID for the API Management subscriptions.
 
 .EXAMPLE
-    .\APIM-Rotate-SubscriptionKeys.ps1 -ResourceGroupName "MyResourceGroup" -ServiceName "MyAPIMService" -SubscriptionId "12345678-1234-1234-1234-123456789012"
+    .\Regenerate-APIMKeys.ps1 -apimName "your-apim-name" -apimResourceGroup "your-resource-group" -masterSubscriptionId "your-master-subscription-id"
 #>
-
-param (
-    [Parameter(Mandatory = $true)]
-    [string]$ResourceGroupName,
-
-    [Parameter(Mandatory = $true)]
-    [string]$ServiceName,
-
-    [Parameter(Mandatory = $true)]
-    [string]$SubscriptionId
+param(
+    [string]$apimName,
+    [string]$apimResourceGroup,
+    [string]$masterSubscriptionId
 )
 
-# Import the necessary module
-Import-Module Az.ApiManagement
-
-# Function to log messages
 function Log-Message {
     param (
-        [string]$Message,
-        [string]$Level = "INFO"
+        [string]$message,
+        [string]$level = "INFO"
     )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Write-Output "$timestamp [$Level] $Message"
+    Write-Output "$timestamp [$level] $message"
 }
 
-# Error handling
 try {
-    Log-Message "Starting key rotation for subscription ID: $SubscriptionId"
+    Log-Message "Disabling AzContext autosave..."
+    Disable-AzContextAutosave -Scope Process
 
-    # Rotate primary key
-    Log-Message "Rotating primary key..."
-    $primaryKey = New-AzApiManagementSubscriptionKey -ResourceGroupName $ResourceGroupName -ServiceName $ServiceName -SubscriptionId $SubscriptionId -KeyType Primary
-    Log-Message "Primary key rotated successfully."
+    Log-Message "Connecting to Azure using system-assigned managed identity..."
+    $AzureContext = (Connect-AzAccount -Identity).context
 
-    # Rotate secondary key
-    Log-Message "Rotating secondary key..."
-    $secondaryKey = New-AzApiManagementSubscriptionKey -ResourceGroupName $ResourceGroupName -ServiceName $ServiceName -SubscriptionId $SubscriptionId -KeyType Secondary
-    Log-Message "Secondary key rotated successfully."
+    Log-Message "Setting and storing Azure context..."
+    $AzureContext = Set-AzContext -SubscriptionName $AzureContext.Subscription -DefaultProfile $AzureContext  
 
-    Log-Message "Key rotation completed successfully for subscription ID: $SubscriptionId"
+    Log-Message "Retrieving API Management services information..."
+    $ApiManagements = Get-AzApiManagement -ResourceGroupName $apimResourceGroup -Name $apimName
+
+    foreach ($ApiManagement in $ApiManagements) {
+        Log-Message "Setting up Azure API Management context for $($ApiManagement.Name)..."
+        $ApiManagementContext = New-AzApiManagementContext -ResourceId $ApiManagement.Id
+
+        Log-Message "Retrieving API Management subscriptions for ProductID $masterSubscriptionId..."
+        $ApiManagementSubscriptions = Get-AzApiManagementSubscription -Context $ApiManagementContext -SubscriptionId $masterSubscriptionId
+
+        foreach ($ApiManagementSubscription in $ApiManagementSubscriptions) {
+            Log-Message "Regenerating keys for subscription $($ApiManagementSubscription.SubscriptionId)..."
+            $PrimaryKey = (New-Guid) -replace '-',''
+            $SecondaryKey = (New-Guid) -replace '-',''
+
+            Log-Message "Setting new keys for subscription $($ApiManagementSubscription.SubscriptionId)..."
+            $newvalue = Set-AzApiManagementSubscription -Context $ApiManagementContext -SubscriptionId $ApiManagementSubscription.SubscriptionId -PrimaryKey $PrimaryKey -SecondaryKey $SecondaryKey -State Active
+        }
+    }
+
+    Log-Message "Key regeneration process completed successfully."
 } catch {
     Log-Message "An error occurred: $_" "ERROR"
     throw
