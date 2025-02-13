@@ -58,15 +58,30 @@ try {
 
     # Login to Azure
     Log-Message "Logging in to Azure..."
-    Connect-AzAccount -ErrorAction Stop
+    az login --identity   
     Log-Message "Successfully logged in to Azure."
 
     # Create the backup
     Log-Message "Creating backup..."
-    $backupName = "$ServiceName-backup-$(Get-Date -Format 'yyyyMMddHHmmss').apimbackup"
-    $storageContext = New-AzStorageContext -StorageAccountName $StorageAccountName -StorageAccountKey $StorageAccountKey -ErrorAction Stop
-    $backupBlob = New-AzStorageBlobSASToken -Context $storageContext -Container $BackupContainer -Blob $backupName -Permission rw -ExpiryTime (Get-Date).AddHours(1) -FullUri
-    Backup-AzApiManagement -ResourceGroupName $ResourceGroupName -Name $ServiceName -StorageAccountContainerUri $backupBlob.Context.Uri.AbsoluteUri -ErrorAction Stop
+
+    #get access token using azure cli
+    $token = az account get-access-token --subscription $subscriptionId --query accessToken --output tsv
+          
+    $backupName = "backup-" + $apiManagementName + "-" + $(Get-Date -Format 'yyyyMMddHHmmss')
+    $accessType="SystemAssignedManagedIdentity"
+    
+    #construct API call for the azure management API
+    $uri = "https://management.azure.com/subscriptions/" + $subscriptionId + "/resourceGroups/" + $ResourceGroupName + "/providers/Microsoft.ApiManagement/service/"+ $ApiManagementName + "/backup?api-version=2024-05-01"
+    $body = @{
+        storageAccount = $StorageAccountName          
+        containerName = $ContainerName
+        backupName = $BackupName
+        accessType = $accessType
+    } | ConvertTo-Json
+    
+    #call azure management API with access token
+    Invoke-RestMethod -Method Post -Uri $uri -Headers @{Authorization = "Bearer $token"} -ContentType "application/json" -Body $body
+    
     Log-Message "Backup created successfully and stored in container '$BackupContainer'."
 
 } catch {
