@@ -18,8 +18,13 @@
     .\Regenerate-APIMKeys.ps1 -apimName "your-apim-name" -apimResourceGroup "your-resource-group" -masterSubscriptionId "your-master-subscription-id"
 #>
 param(
+    [Parameter(Mandatory = $true)]
     [string]$apimName,
+
+    [Parameter(Mandatory = $true)]
     [string]$apimResourceGroup,
+    
+    [Parameter(Mandatory = $true)]
     [string]$masterSubscriptionId
 )
 
