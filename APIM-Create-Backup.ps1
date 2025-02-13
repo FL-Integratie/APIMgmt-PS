@@ -25,10 +25,19 @@
 #>
 
 param(
+    [Parameter(Mandatory = $true)]
     [string]$subscriptionId,
+    
+    [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
+    
+    [Parameter(Mandatory = $true)]
     [string]$ApiManagementName,
+    
+    [Parameter(Mandatory = $true)]
     [string]$StorageAccountName,
+    
+    [Parameter(Mandatory = $true)]
     [string]$ContainerName
 )
 
